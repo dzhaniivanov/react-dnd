@@ -3,21 +3,43 @@ import { getTodos, addTodo, updateTodo, deleteTodo } from "../../api/todosApi";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faTrash, faUpload } from "@fortawesome/free-solid-svg-icons";
-import { useState } from "react";
-import { DragDropContext, Droppable, Draggable } from "react-beautiful-dnd";
+import { useState, useEffect } from "react";
+import { DragDropContext, Draggable } from "react-beautiful-dnd";
+import { StrictModeDroppable as Droppable } from "../../helpers/StrictModeDroppable";
 
 const TodoList = () => {
   const [newTodo, setNewTodo] = useState("");
   const queryClient = useQueryClient();
 
-  const {
-    isLoading,
-    isError,
-    error,
-    data: todos,
-  } = useQuery("todos", getTodos, {
+  const { isLoading, isError, error, data } = useQuery("todos", getTodos, {
     select: (data) => data.sort((a, b) => b.id - a.id),
   });
+
+  const [todos, updateTodos] = useState(data || []);
+
+  useEffect(() => {
+    const arrayIdsOrder = JSON.parse(localStorage.getItem("taskOrder"));
+
+    if (!arrayIdsOrder && data?.length) {
+      const idsOrderArray = data.map((task) => task.id);
+      localStorage.setItem("tasksOrder", JSON.stringify(idsOrderArray));
+    }
+
+    let myArray;
+
+    if (arrayIdsOrder?.length && data?.length) {
+      myArray = arrayIdsOrder.map((pos) => {
+        return data.find((el) => el.id === pos);
+      });
+
+      const newItems = data.filter((el) => {
+        return !arrayIdsOrder.includes(el.id);
+      });
+
+      if (newItems?.length) myArray = [...newItems, ...myArray];
+    }
+    updateTodos(myArray || data);
+  }, [data]);
 
   const addTodoMutation = useMutation(addTodo, {
     onSuccess: () => {
@@ -46,6 +68,32 @@ const TodoList = () => {
     setNewTodo("");
   };
 
+  const handleOnDragEnd = (result) => {
+    if (!result.destination) return;
+
+    const tasks = [...todos];
+
+    const [reorderedItem] = tasks.splice(result.source.index, 1);
+
+    tasks.splice(result.destination.index, 0, reorderedItem);
+
+    const idsOrderArray = tasks.map((task) => task.id);
+    localStorage.setItem("taskOrder", JSON.stringify(idsOrderArray));
+
+    updateTodos(tasks);
+  };
+
+  const handleDelete = (id) => {
+    const arrayIdsOrder = JSON.parse(localStorage.getItem("taskOrder"));
+
+    if (arrayIdsOrder?.length) {
+      const newIdsOrderArray = arrayIdsOrder.filter((num) => num !== id);
+      localStorage.setItem("taskOrder", JSON.stringify(newIdsOrderArray));
+    }
+
+    deleteTodoMutation.mutate({ id });
+  };
+
   const newItemSection = (
     <form onSubmit={handleSubmit}>
       <label htmlFor="new-todo">Enter a new todo item</label>
@@ -71,7 +119,7 @@ const TodoList = () => {
     content = <p>{error.message}</p>;
   } else {
     content = (
-      <DragDropContext>
+      <DragDropContext onDragEnd={handleOnDragEnd}>
         <Droppable droppableId="todos">
           {(provided) => (
             <section {...provided.droppableProps} ref={provided.innerRef}>
@@ -85,7 +133,7 @@ const TodoList = () => {
                     {(provided) => (
                       <article
                         {...provided.draggableProps}
-                        {...provided.draggableProps}
+                        {...provided.dragHandleProps}
                         ref={provided.innerRef}
                       >
                         <div className="todo">
@@ -104,9 +152,7 @@ const TodoList = () => {
                         </div>
                         <button
                           className="trash"
-                          onClick={() =>
-                            deleteTodoMutation.mutate({ id: todo.id })
-                          }
+                          onClick={() => handleDelete(todo.id)}
                         >
                           <FontAwesomeIcon icon={faTrash} />
                         </button>
